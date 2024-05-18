@@ -1,0 +1,27 @@
+[project]
+name = "batterseye"
+version = "0.0.1"
+authors = [
+    { name="Kevin Schattin", email="ks3936@columbia.edu" },
+]
+description = "Computer vision for baseball player identification"
+readme = "README.md"
+dependencies = [
+    "tensorflow >= 2.16.0",
+    "pandas",
+    "numpy",
+    "requests",
+    "opencv-python",
+    "tqdm",
+    "beautifulsoup4",
+    "MLB-StatsAPI",
+    "moviepy",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["batterseye"]
+exclude = ["data"]
