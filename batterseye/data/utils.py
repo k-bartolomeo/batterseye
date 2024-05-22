@@ -1,12 +1,11 @@
 import os
-import random
-from itertools import combinations
 from collections import defaultdict
 
 import numpy as np
 import numpy.typing as npt
 
 import pandas as pd
+import statsapi as sa
 import tensorflow as tf
 
 from tqdm import tqdm
@@ -49,8 +48,8 @@ class ImgLoader:
         Type of images returned by image loader.
     """
     def __init__(self, matchups: pd.DataFrame, kind: str = 'both'):
-        self.batters = defaultdict(list)
-        self.pitchers = defaultdict(list)
+        self._batters = defaultdict(list)
+        self._pitchers = defaultdict(list)
         self.matchups = matchups
         self.batter_id_dict = (
             self._init_batter_id_dict(matchups) if kind != 'pitcher' else None
@@ -79,12 +78,12 @@ class ImgLoader:
     def _load_batter_img(self, img: npt.NDArray, play_id: str) -> None:
         """Adds image to dictionary mapping batters to their images"""
         batter_id = self.batter_id_dict[play_id]
-        self.batters[batter_id].append(img)
+        self._batters[batter_id].append(img)
 
     def _load_pitcher_img(self, img: npt.NDArray, play_id: str) -> None:
         """Adds image to dictionary mapping pitchers to their images"""
         pitcher_id = self.pitcher_id_dict[play_id]
-        self.pitchers[pitcher_id].append(img)
+        self._pitchers[pitcher_id].append(img)
 
     def _load_both_imgs(self, img: npt.NDArray, play_id: str) -> None:
         """Adds images to both batter and pitcher dictionaries"""
@@ -129,11 +128,11 @@ class ImgLoader:
                 continue
 
         if self.kind == 'batter':
-            return self.batters
+            return self._batters
         elif self.kind == 'pitcher':
-            return self.pitchers
+            return self._pitchers
         else:
-            return self.batters, self.pitchers
+            return self._batters, self._pitchers
         
     def split_ids(self) -> list[set]:
         """Splits batter and pitcher IDs into sets by handedness"""
@@ -149,83 +148,18 @@ class ImgLoader:
         return [x for x in player_ids if x is not None]
         
     def __len__(self):
-        return len(self.batters), len(self.pitchers)
+        return len(self._batters), len(self._pitchers)
     
     @property
     def pitchers(self) -> set:
         """Gets set of pitcher IDs"""
-        return set(self.pitchers)
+        return set(self._pitchers)
     
     @property
     def batters(self) -> set:
         """Gets set of batter IDs"""
-        return set(self.batters)
+        return set(self._batters)
     
-
-def build_siamese_dataset(
-    players: dict[str, list],
-    lefty: set[str],
-    righty: set[str],
-    same_factor: int = 3,
-    n_diff: int = 500
-):
-    """Builds dataset for training and evaluating Siamese network
-    
-    Creates pairs of images of players with same handedness. Since 
-    number of image pairs that can be created where the player is 
-    the same will generally be fewer than the number of image pairs
-    that can be created where the players are different, the pairs
-    where the player is the same are oversampled using the provided
-    `same_factor`. For image pairs with different players, each 
-    player will be included in at least `n_diff` such pairs.
-
-
-    Parameters
-    ----------
-    players
-        Dictionary mapping player IDs to images of the player.
-    lefty
-        Set of player IDs for left-handed players.
-    righty
-        Set of player IDs for right-handed players.
-    same_factor
-        Scaling factor for number of image pairs of same player 
-        to include in dataset.
-    n_diff
-        Number of image pairs of different players to create
-        for a given player.
-    """
-    pairs = []
-    labels = []
-
-    all_players = set(players)
-    for player in tqdm(all_players):
-        if len(players[player]) < 2:
-            continue
-        same_pairs = list(combinations(players[player], 2))
-        same_pairs = same_pairs * same_factor
-
-        player_set = lefty if player in lefty else righty
-        diff_players = list(player_set - set([player]))
-        for _ in range(n_diff):
-            if len(same_pairs) > 0:
-                same_player = same_pairs.pop()
-                pairs.append(same_player)
-                labels.append(0)
-
-            player_img = random.choice(players[player])
-            diff_player = random.choice(diff_players)
-            diff_player_img = random.choice(players[diff_player])
-            pairs.append((player_img, diff_player_img))
-            labels.append(1)
-
-    records = list(zip(pairs, labels))
-    random.shuffle(records)
-    pairs = [x[0] for x in records]
-    labels = [x[1] for x in records]
-
-    return pairs, labels
-
 
 def split(
     pairs: list[tuple], labels: list[int], val: float, test: float
@@ -245,3 +179,81 @@ def split(
     y_test = labels[train_val_split:]
 
     return X_train, y_train, X_val, y_val, X_test, y_test
+
+
+def get_player_team(player_id: int) -> list[int]:
+    """Retrieve given player's teams during 2023 MLB season"""
+    query = {
+        'personIds': player_id,
+        'season': 2023,
+        'hydrate': 'stats(group=[pitching],type=season,season=2023)'
+    }
+    player = sa.get('people', query)
+    player_splits = player['people'][0]['stats'][0]['splits']
+    team_ids = [x['team']['id'] for x in player_splits if 'team' in x]
+    return team_ids
+
+
+def get_teammates(player_team_map: dict) -> dict:
+    """Gets dictionary mapping player IDs to teammates' IDs"""
+    teammates = {}
+    for player, teams in tqdm(player_team_map.items()):
+        same_team = []
+        for team in teams:
+            t = [
+                k for k in player_team_map
+                if team in player_team_map[k] and k != player
+            ]
+            same_team.extend(t)
+        teammates[player] = same_team
+
+    return teammates
+
+
+def hash_tensor(tensor: tf.Tensor) -> str:
+    """Gets hash value for 3D image tensor"""
+    h = str(hash(tensor.numpy()[0].tobytes()))
+    return h
+
+
+def hash_img_pair(img_pair: list[tf.Tensor]) -> str:
+    """Gets hash value for pair of 3D image tensors
+    
+    Gets hash value for each image in pair individually. Converts
+    hash values to strings and then joins them together, returning
+    a single string.
+
+    Parameters
+    ----------
+    img_pair
+        Pair of images for which hash value is derived.
+
+    Returns
+    -------
+    str
+        Hash value for given image pair.
+    """
+    h = ''.join([hash_tensor(img) for img in img_pair])
+    return h
+
+
+def get_img_pair_hashes(img_pairs: list[tuple]) -> list[str]:
+    """Gets list of hashes for given image pairs"""
+    hashes = [hash_img_pair(img_pair) for img_pair in tqdm(img_pairs)]
+    return hashes
+
+
+def write_img_hashes(hashes: list[str], path: str) -> None:
+    """Writes list of hash values to text file"""
+    lines = [f'{h}\n' for h in hashes]
+    with open(path, 'w') as f:
+        f.writelines(lines)
+    f.close()
+
+
+def load_img_hashes(path: str) -> set:
+    """Loads list of hash values from given text file"""
+    with open(path, 'r') as f:
+        hashes = set(h.rstrip('\n') for h in f.readlines())
+    f.close()
+    return hashes

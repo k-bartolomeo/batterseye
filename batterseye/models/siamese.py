@@ -52,6 +52,7 @@ class SiameseNetwork(tf.keras.Model):
     """
     def __init__(
         self,
+        input_dim: int,
         output_dim: int,
         layer_type: str,
         n_blocks: int,
@@ -64,6 +65,7 @@ class SiameseNetwork(tf.keras.Model):
     ):
         super(SiameseNetwork, self).__init__()
         self.embedding_network = EmbeddingNetwork(
+            input_dim=input_dim,
             output_dim=output_dim, 
             layer_type=layer_type, 
             n_blocks=n_blocks,
@@ -78,8 +80,10 @@ class SiameseNetwork(tf.keras.Model):
         self.bn = tf.keras.layers.BatchNormalization()
         self.output_layer = tf.keras.layers.Dense(1, activation='sigmoid')
 
-    def call(self, input_tensor_1, input_tensor_2, training=False):
+    def call(self, input_tensor, training=False):
         """Passes pair input tensors through Siamese network"""
+        input_tensor_1 = input_tensor['x1']
+        input_tensor_2 = input_tensor['x2']
         x1 = self.embedding_network(input_tensor_1)
         x2 = self.embedding_network(input_tensor_2)
         x = self.merge_layer([x1, x2])

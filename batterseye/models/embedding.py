@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-class ConvBlock(tf.keras.Model):
+class ConvBlock(tf.keras.layers.Layer):
     """Convolutional block for embedding network
 
     Builds single convolutional block with specified parameters.
@@ -55,9 +55,10 @@ class ConvBlock(tf.keras.Model):
         x = self.batch_norm(x, training=training)
         x = self.relu(x)
         x = self.dropout(x)
+        return x
 
 
-class ResidualBlock(tf.keras.Model):
+class ResidualBlock(tf.keras.layers.Layer):
     """Residual block for embedding network
 
     Builds residual block with three convolutional layers and three
@@ -88,32 +89,44 @@ class ResidualBlock(tf.keras.Model):
     kernel_size
         Size of the filters in the second convolutional layer.
     """
-    def __init__(self, filters: list[int], kernel_size: tuple[int, int]) -> None:
+    def __init__(
+        self,
+        input_dim: int,
+        filters: int,
+        kernel_size: int = 3,
+        strides: int = 1
+    ) -> None:
         super(ResidualBlock, self).__init__()
-        self.conv1 = tf.keras.layers.Conv2D(filters[0], (1, 1))
-        self.conv2 = tf.keras.layers.Conv2D(filters[1], kernel_size, padding='same')
-        self.conv3 = tf.keras.layers.Conv2D(filters[2], (1, 1))
+        self.conv1 = tf.keras.layers.Conv2D(
+            filters, kernel_size=kernel_size, strides=strides, padding='same'
+        )
+        self.conv2 = tf.keras.layers.Conv2D(
+            filters, kernel_size=kernel_size, strides=strides, padding='same'
+        )
+        self.skip_connection = tf.keras.layers.Identity()
+        if strides != 1 or input_dim != filters:
+            self.skip_connection = tf.keras.layers.Conv2D(
+                filters, kernel_size=1, strides=strides, padding='same'
+            )
+
         self.bn1 = tf.keras.layers.BatchNormalization()
         self.bn2 = tf.keras.layers.BatchNormalization()
-        self.bn3 = tf.keras.layers.BatchNormalization()
         self.relu = tf.keras.layers.ReLU()
 
     def call(self, input_tensor, training=False):
         """Passes input tensor through residual block"""
+        identity_x = self.skip_connection(input_tensor)
         x = self.conv1(input_tensor)
         x = self.bn1(x, training=training)
         x = self.relu(x)
         x = self.conv2(x)
         x = self.bn2(x, training=training)
-        x = self.relu(x)
-        x = self.conv3(x)
-        x = self.bn3(x, training=training)
-        x += input_tensor
+        x += identity_x
         x = self.relu(x)
         return x
 
 
-class EmbeddingNetwork(tf.keras.Model):
+class EmbeddingNetwork(tf.keras.layers.Layer):
     """Embedding network component of Siamese network
 
     Builds single convolutional block with specified parameters.
@@ -153,15 +166,17 @@ class EmbeddingNetwork(tf.keras.Model):
     """
     def __init__(
         self,
+        input_dim: int,
         output_dim: int,
         layer_type: str,
         n_blocks: int,
-        filters: int | list[int, int, int],
-        kernel_size: int | tuple[int, int],
+        filters: int,
+        kernel_size: int,
         strides: int = 2,
         padding: str = 'same',
         dropout: float = 0.0
     ):
+        super().__init__()
         self.blocks = []
         self.bn = tf.keras.layers.BatchNormalization()
         self.flatten = tf.keras.layers.Flatten()
@@ -179,13 +194,13 @@ class EmbeddingNetwork(tf.keras.Model):
                 self.blocks.append(block)
 
         elif layer_type == 'residual':
-            if not isinstance(filters, list):
-                raise ValueError(
-                    "Argument `filters` must be a list if "
-                    "argument `layer_type` is set to 'residual'"
-                )
             for _ in range(n_blocks):
-                block = ResidualBlock(filters=filters, kernel_size=kernel_size)
+                block = ResidualBlock(
+                    input_dim=input_dim,
+                    filters=filters,
+                    kernel_size=kernel_size,
+                    strides=strides
+                )
                 self.blocks.append(block)
 
         else:
