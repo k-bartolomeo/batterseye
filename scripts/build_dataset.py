@@ -8,7 +8,7 @@ if __name__ == '__main__':
     """Builds dataset of images and matchup metadata"""
     parser = argparse.ArgumentParser()
     parser.add_argument('--team-ids', default='147,146,121,111')
-    parser.add_argument('--matchup-path', default='./data/matchups.dsv')
+    parser.add_argument('--matchup-path', default='./data/matchups.csv')
     parser.add_argument('--img-dir', default='./data/images')
     parser.add_argument('--img-size', default=360)
     parser.add_argument('--threads', default=50)
