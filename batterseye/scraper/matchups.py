@@ -6,6 +6,18 @@ import mlbstatsapi as sa
 from tqdm import tqdm
 
 
+def get_game_ids(team_ids: list) -> list:
+    """Gets game IDs from 2023 season for given teams"""
+    game_ids = []
+    for team_id in team_ids:
+        schedule = sa.schedule(
+            start_date='04/01/2023', end_date='11/01/2023', team=team_id
+        )
+        team_game_ids = [x['game_id'] for x in schedule]
+        game_ids.extend(team_game_ids)
+    return game_ids
+
+
 def get_batter(play: dict) -> dict:
     """Gets batter information from given play"""
     matchup_info = play['matchup']
